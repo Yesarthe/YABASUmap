@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+    <head>
+        <title>YABASU Map</title>
+        <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.css" />
+        <script src="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+
+        <style>
+            .container {
+                display: flex;
+                width: 100%;
+                height: 100vh;
+            }
+            #map {
+                width: 70%;
+                height: 100%;
+            }
+            #tbl-wrapper {
+                width: 30%;
+                margin-left: 10px;
+                height: 100%;
+                overflow-y: auto; /* スクロールを追加 */
+            }
+            #tbl {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th,
+            td {
+                padding: 10px;
+                border: 1px solid #ddd;
+                text-align: left;
+            }
+            /* ボタンのスタイル */
+            button {
+                margin-top: 10px;
+                padding: 10px;
+                font-size: 16px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="container">
+            <div id="map"></div>
+            <div id="tbl-wrapper">
+                <table border="1" id="tbl">
+                    <tr>
+                        <th>location</th>
+                        <th>note</th>
+                        <th>colorIndex</th>
+                    </tr>
+                    <tbody>
+                        <!-- 動的に行が追加されます -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="mt-3">
+            <input type="file" id="csvFile" />
+            <button class="btn btn-primary" onclick="readCSV()">CSVファイルを読み込む</button>
+        </div>
+
+        <script>
+            // Creating map options
+            let mapOptions = {
+                center: [35.6895, 139.6917],
+                zoom: 10,
+            };
+            let map = new L.map("map", mapOptions); // Creating a map object
+            // Creating a Layer object
+            let layer = new L.TileLayer("http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png");
+            map.addLayer(layer); // Adding layer to the map
+
+            function getSvgIcon(color) {
+                return (
+                    "data:image/svg+xml;base64," +
+                    btoa(`
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="${color}" class="bi bi-pin" viewBox="0 0 16 16">
+                        <path d="M4.146.146A.5.5 0 0 1 4.5 0h7a.5.5 0 0 1 .5.5c0 .68-.342 1.174-.646 1.479-.126.125-.25.224-.354.298v4.431l.078.048c.203.127.476.314.751.555C12.36 7.775 13 8.527 13 9.5a.5.5 0 0 1-.5.5h-4v4.5c0 .276-.224 1.5-.5 1.5s-.5-1.224-.5-1.5V10h-4a.5.5 0 0 1-.5-.5c0-.973.64-1.725 1.17-2.189A6 6 0 0 1 5 6.708V2.277a3 3 0 0 1-.354-.298C4.342 1.674 4 1.179 4 .5a.5.5 0 0 1 .146-.354"/>
+                    </svg>
+                `)
+                );
+            }
+
+            function createCustomIcon(color) {
+                return L.icon({
+                    iconUrl: getSvgIcon(getHazardColor(color)),
+                    iconSize: [40, 40],
+                    iconAnchor: [20, 40],
+                    popupAnchor: [0, -40],
+                });
+            }
+
+            let getHazardColor = (index) => {
+                switch (index) {
+                    case 3: // げきやば:3
+                        return "mediumvioletred";
+                    case 2: // やば:2
+                        return "crimson";
+                    case 1: // 注意:1
+                        return "gold";
+                    default: // 備考: 0
+                        return "slategray";
+                }
+            };
+
+            let createMaker = (latitude, longitude, note, colorIndex = 0) => {
+                try {
+                    let customIcon = createCustomIcon(colorIndex);
+                    let marker = L.marker([latitude, longitude], {icon: customIcon});
+                    marker.bindPopup(note).openPopup(); // ポップアップも追加
+                    marker.addTo(map);
+                    addRow(latitude, longitude, note, colorIndex);
+                } catch (e) {
+                    throw new Error(e);
+                }
+            };
+
+            function addRow(latitude, longitude, note, colorIndex) {
+                let tbl = document.getElementById("tbl").getElementsByTagName("tbody")[0];
+                // 新しい行を作成
+                let tr = document.createElement("tr");
+                // 各セルを作成し、行に追加
+                let locationTd = document.createElement("td");
+                let locationButton = document.createElement("button");
+                locationButton.classList.add("btn", "btn-secondary");
+                locationButton.textContent = `${latitude}, ${longitude}`;
+                locationButton.setAttribute("data-lat", latitude); // 緯度をデータ属性として保存
+                locationButton.setAttribute("data-lng", longitude); // 経度をデータ属性として保存
+                locationButton.setAttribute("data-note", note); // メモも保存
+                locationButton.onclick = function () {
+                    // ボタンがクリックされたときに地図をその場所に移動し、ポップアップを表示
+                    map.setView([latitude, longitude], 12); // ズームレベルは12に設定
+                    L.popup().setLatLng([latitude, longitude]).setContent(note).openOn(map); // ポップアップを開く
+                };
+                locationTd.appendChild(locationButton);
+                tr.appendChild(locationTd);
+                let noteTd = document.createElement("td");
+                noteTd.textContent = note;
+                tr.appendChild(noteTd);
+                let colorIndexTd = document.createElement("td");
+                colorIndexTd.textContent = colorIndex;
+                tr.appendChild(colorIndexTd);
+                // 行をテーブルに追加
+                tbl.appendChild(tr);
+            }
+
+            function readCSV() {
+                let fileInput = document.getElementById("csvFile");
+                let file = fileInput.files[0];
+                if (!file) {
+                    alert("CSVファイルを選択してください。");
+                    return;
+                }
+                Papa.parse(file, {
+                    complete: function (results) {
+                        let data = results.data;
+                        for (let i = 1; i < data.length; i++) {
+                            let latitude = parseFloat(data[i][0]);
+                            let longitude = parseFloat(data[i][1]);
+                            let note = data[i][2];
+                            let colorIndex = parseInt(data[i][3]);
+                            createMaker(latitude, longitude, note, colorIndex);
+                        }
+                    },
+                    header: false, // ヘッダーがない場合
+                });
+            }
+
+            // 初期のマーカー追加例
+            createMaker(35.7895, 139.6917, "東京", 0);
+            createMaker(35.5895, 140.6917, "東京", 1);
+            createMaker(35.2895, 139.6917, "東京", 2);
+            createMaker(35.3895, 139.6917, "ロサンゼルス", 3);
+        </script>
+    </body>
+</html>
